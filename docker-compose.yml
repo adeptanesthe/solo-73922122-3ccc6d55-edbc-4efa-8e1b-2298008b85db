@@ -1,13 +1,52 @@
 services:
+  # 监管门户演示站：仅提供网页界面，填报 API 只能通过浏览器操作它。
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile.portal
+    container_name: bus-regulator-portal
+    environment:
+      PORTAL_HOST: "0.0.0.0"
+      PORTAL_PORT: "8010"
+      PORTAL_USERNAME: "${PORTAL_USERNAME:-demo}"
+      PORTAL_PASSWORD: "${PORTAL_PASSWORD:-demo-pass}"
+      TZ: "${TZ:-Asia/Shanghai}"
+    expose:
+      - "8010"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=2).read()"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # 代填报 API：FastAPI + Playwright + SQLite，单 worker 串行处理任务。
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: bus-od-suppression-api
+    container_name: bus-filing-api
+    depends_on:
+      portal:
+        condition: service_healthy
     ports:
       - "${HOST_PORT:-8000}:8000"
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
+      PORTAL_BASE_URL: "http://portal:8010"
+      PORTAL_USERNAME: "${PORTAL_USERNAME:-demo}"
+      PORTAL_PASSWORD: "${PORTAL_PASSWORD:-demo-pass}"
+      FILING_DB_PATH: "/data/filing.db"
+      PLAYWRIGHT_HEADLESS: "1"
+      BROWSER_TIMEOUT_MS: "${BROWSER_TIMEOUT_MS:-20000}"
+      STEP_MAX_ATTEMPTS: "${STEP_MAX_ATTEMPTS:-4}"
+    volumes:
+      - filing-data:/data
     restart: unless-stopped
     healthcheck:
       test:
@@ -18,4 +57,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 10s
+
+volumes:
+  filing-data:

@@ -9,12 +9,17 @@ Interactive API documentation: http://localhost:8000/docs
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from typing import Annotated, List, Literal, Optional
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from .filing.api import router as filing_router
+from .filing.config import get_settings
+from .filing.db import FilingStore
+from .filing.worker import FilingWorker
 from .solver import CellRange, NoSolutionError, SolveResult, solve
 
 # ---------------------------------------------------------------------------
@@ -218,26 +223,54 @@ NO_SOLUTION_EXAMPLE = {
     }
 }
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Own the SQLite store and the single filing worker for app lifetime."""
+
+    settings = get_settings()
+    store = FilingStore(settings.database_path)
+    worker = FilingWorker(store, settings)
+    _app.state.filing_store = store
+    _app.state.filing_worker = worker
+    worker.start_background()
+    try:
+        yield
+    finally:
+        worker.stop_background()
+        store.close()
+
+
 app = FastAPI(
-    title="公交站间客流补充隐藏 API",
-    summary="保留行列合计的小客流单元补充隐藏服务",
+    title="公交运营统计代填报与客流补充隐藏 API",
+    summary="月度线路里程代填报（Playwright + SQLite）与客流矩阵补充隐藏服务",
     description=(
+        "## 代填报\n"
+        "新增 `/filing` 系列接口：接收 YYYY-MM 月份及 1～20 条唯一线路 ID 与"
+        "非负整数运营公里数，由唯一的后台任务通过 Playwright 操作监管门户"
+        "（固定地址与演示账户），逐行保存草稿、提交前完整复核并最终提交。"
+        "请求与回执保存在 SQLite，支持断流/重启后续办，同月同内容可重试、"
+        "异内容拒绝。\n\n"
+        "## 客流补充隐藏（原接口保留）\n"
         "接收带站名的 2～3 行、2～4 列客流矩阵和阈值 k。先隐藏值为 1～k−1 "
         "的单元，再以最少格数补充隐藏其他单元，使每个先隐藏单元在所有符合"
         "公开值和行列合计的非负整数矩阵中至少有两个可行值。发布矩阵以 null "
         "表示隐藏格；返回结果同时列出每个先隐藏单元的最小/最大可行值，供内部核对。\n\n"
         "**示例说明：** " + EXAMPLE_EXPLANATION
     ),
-    version="1.0.0",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
     openapi_tags=[
+        {"name": "filing", "description": "月度线路里程代填报、续办与状态查询"},
         {"name": "suppression", "description": "补充隐藏求解"},
         {"name": "examples", "description": "可调用示例"},
         {"name": "system", "description": "服务状态"},
     ],
 )
+
+app.include_router(filing_router)
 
 
 @app.get("/", include_in_schema=False)

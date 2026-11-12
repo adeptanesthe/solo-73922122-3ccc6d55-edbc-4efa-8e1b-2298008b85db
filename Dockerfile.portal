@@ -1,0 +1,22 @@
+# Lightweight image for the bundled demo regulator portal.
+# The portal only uses the Python standard library, so it needs no browser.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN groupadd --system portal && \
+    useradd --system --gid portal --home-dir /app --shell /usr/sbin/nologin portal
+
+COPY app/portal_app.py ./app/portal_app.py
+
+USER portal
+
+EXPOSE 8010
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=2).read()"
+
+CMD ["python", "-m", "app.portal_app"]

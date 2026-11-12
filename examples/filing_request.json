@@ -1,0 +1,8 @@
+{
+  "month": "2026-11",
+  "lines": [
+    {"line_id": "L-100", "kilometres": 5200},
+    {"line_id": "L-101", "kilometres": 3380},
+    {"line_id": "L-102", "kilometres": 0}
+  ]
+}
